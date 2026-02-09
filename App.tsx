@@ -5,21 +5,57 @@ import { fetchAndParseProducts } from './services/csvService';
 import { extractShoppingItems, ExtractedItem } from './services/geminiService';
 import ProductTable from './components/ProductTable';
 
+// Expanded Thesaurus for better synonym matching
 const medicalThesaurus: Record<string, string[]> = {
-  'afastador': ['afastador', 'afast', 'retractor'],
-  'pinca': ['pinca', 'pinça', 'forceps', 'clamp'],
-  'tesoura': ['tesoura', 'tes', 'scissors'],
-  'porta': ['porta', 'needle', 'holder'],
+  'afastador': ['afastador', 'afast', 'retractor', 'afast.'],
+  'pinca': ['pinca', 'pinça', 'forceps', 'clamp', 'pinca.', 'pinça.'],
+  'tesoura': ['tesoura', 'tes', 'scissors', 'tes.'],
+  'porta': ['porta', 'needle', 'holder', 'porta-agulha'],
   'cabo': ['cabo', 'handle'],
-  'volkmann': ['volkmann', 'volkman', 'wulkman', 'vulkman', 'vulkmann'],
+  'fio': ['fio', 'suture', 'wire'],
+  'volkmann': ['volkmann', 'volkman', 'wulkman', 'vulkman', 'vulkmann', 'wolkman', 'wolkmann'],
+  'kocher': ['kocher', 'kocker', 'cocher', 'cocker', 'kocher.'],
   'senn': ['senn', 'sen', 'semm', 'sem'],
   'mueller': ['mueller', 'muller', 'mulir', 'muler'],
   'metzenbaum': ['metzenbaum', 'metz', 'metzebaum'],
   'mayo': ['mayo', 'maio'],
-  'kelly': ['kelly', 'kely'],
+  'kelly': ['kelly', 'kely', 'keli'],
   'clipe': ['clipe', 'clips', 'clip'],
-  'clips': ['clips', 'clipe', 'clip'],
+  'gancho': ['gancho', 'ganchos', 'garra', 'garras', 'dente', 'dentes'],
+  'mosquito': ['mosquito', 'halstead', 'halsted'],
+  'bisturi': ['bisturi', 'scalpel', 'lâmina', 'lamina'],
+  'adson': ['adson', 'adsson'],
+  'allis': ['allis', 'alis'],
+  'babcock': ['babcock', 'babcok'],
+  'backhaus': ['backhaus', 'backaus'],
+  'gelpi': ['gelpi', 'gelpy', 'golpi'],
+  'weitlaner': ['weitlaner', 'weitlaner', 'westphal'],
+  'mixter': ['mixter', 'mixture'],
+  'crile': ['crile', 'crille'],
+  'rochester': ['rochester'],
+  'pean': ['pean'],
+  'guthrie': ['guthrie', 'gunthrie', 'gutrie'],
+  'cizalha': ['cizalha', 'cisalha', 'alicate'],
+  'liston': ['liston', 'listom'],
+  'farabeuf': ['farabeuf', 'farabef', 'farabauf'],
+  'yankauer': ['yankauer', 'yankau', 'yancauer'],
+  'hartmann': ['hartmann', 'hartman'],
+  'bunt': ['bunt', 'bunti'],
+  'hegar': ['hegar', 'hegger'],
 };
+
+// Stop words - terms that add very little value to search
+const STOP_WORDS = new Set([
+  'de', 'do', 'da', 'com', 'para', 'em', 'cm', 'mm', 'ml', 'unid', 'cx', 'pc', 'pç', 'jogo', 'kit', 'conjunto'
+]);
+
+// Category terms - important for type matching, but less specific than names like "Volkmann"
+const CATEGORY_TERMS = new Set([
+  'afastador', 'pinca', 'pinça', 'tesoura', 'porta', 'cabo', 'fio', 'lamina', 'lâmina', 
+  'bisturi', 'agulha', 'clip', 'clipe', 'clips', 'broca', 'raspador', 'elevador', 'descolador', 
+  'valva', 'especulo', 'espéculo', 'aspirador', 'canula', 'cânula', 'cesta', 'caixa', 
+  'cizalha', 'gancho', 'garra', 'dente', 'sonda', 'cateter', 'drill', 'perfurador'
+]);
 
 const normalizeText = (text: string): string => {
   return text.toLowerCase()
@@ -30,74 +66,135 @@ const normalizeText = (text: string): string => {
     .trim();
 };
 
+// Standard Levenshtein implementation
 const levenshtein = (a: string, b: string): number => {
-  const tmp: number[][] = [];
-  for (let i = 0; i <= a.length; i++) tmp[i] = [i];
-  for (let j = 0; j <= b.length; j++) tmp[0][j] = j;
-  for (let i = 1; i <= a.length; i++) {
-    for (let j = 1; j <= b.length; j++) {
-      tmp[i][j] = Math.min(
-        tmp[i - 1][j] + 1,
-        tmp[i][j - 1] + 1,
-        tmp[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)
-      );
+  if (a.length === 0) return b.length;
+  if (b.length === 0) return a.length;
+  
+  const matrix = [];
+
+  for (let i = 0; i <= b.length; i++) {
+    matrix[i] = [i];
+  }
+
+  for (let j = 0; j <= a.length; j++) {
+    matrix[0][j] = j;
+  }
+
+  for (let i = 1; i <= b.length; i++) {
+    for (let j = 1; j <= a.length; j++) {
+      if (b.charAt(i - 1) === a.charAt(j - 1)) {
+        matrix[i][j] = matrix[i - 1][j - 1];
+      } else {
+        matrix[i][j] = Math.min(
+          matrix[i - 1][j - 1] + 1,
+          matrix[i][j - 1] + 1,
+          matrix[i - 1][j] + 1
+        );
+      }
     }
   }
-  return tmp[a.length][b.length];
+
+  return matrix[b.length][a.length];
 };
 
 const calculateMatchScore = (product: MappedProduct, query: string): number => {
   const normalizedQuery = normalizeText(query);
+  const normalizedTitle = normalizeText(product.title);
+  
   const queryTokens = normalizedQuery.split(" ").filter(t => t.length > 0);
+  const productTokens = normalizedTitle.split(" ");
+  
   if (queryTokens.length === 0) return 0;
 
-  const productTitle = normalizeText(product.title);
-  const productWords = productTitle.split(" ");
-  
-  let score = 0;
-  
-  // High weight for items that contain all query words
-  const containsAllTokens = queryTokens.every(token => {
-    const synonyms = medicalThesaurus[token] || [token];
-    return synonyms.some(syn => productTitle.includes(syn));
+  let totalScore = 0;
+  let exactTokenMatches = 0;
+
+  // 1. Check if all important tokens are present (Boost for "Perfect" matches)
+  const allImportantTokensPresent = queryTokens.every(qToken => {
+    // Stop words don't break "perfect match" if missing
+    if (STOP_WORDS.has(qToken)) return true;
+    if (qToken.length < 3 && !isNaN(Number(qToken))) return true; // Ignore small numbers for this check
+    
+    const synonyms = medicalThesaurus[qToken] || [qToken];
+    return synonyms.some(syn => normalizedTitle.includes(syn));
   });
 
-  if (containsAllTokens) score += 5000;
+  if (allImportantTokensPresent) totalScore += 6000;
 
-  // Weight for first word matching (Anchor)
+  // 2. Token Matching with Weights
+  queryTokens.forEach(qToken => {
+    let bestTokenScore = 0;
+    
+    // Determine Weight
+    let tokenWeight = 0;
+    
+    if (STOP_WORDS.has(qToken)) {
+      tokenWeight = 50; // Minimal weight for connectors/units
+    } else if (CATEGORY_TERMS.has(qToken)) {
+      tokenWeight = 2500; // Significant weight for Product Type (e.g., "Clips")
+    } else if (!isNaN(Number(qToken))) {
+      tokenWeight = 500; // Medium weight for numbers
+    } else {
+      tokenWeight = 4500; // High weight for Specific Names (e.g. "Volkmann", "Mayo")
+    }
+
+    const synonyms = medicalThesaurus[qToken] || [qToken];
+
+    // Check against all product tokens
+    for (const pToken of productTokens) {
+      // A. Exact Match or Synonym Match
+      if (synonyms.some(s => s === pToken)) {
+        bestTokenScore = Math.max(bestTokenScore, 1.0);
+        continue;
+      }
+
+      // B. Prefix Match (e.g. "Volk" matches "Volkmann") - only for specific terms
+      if (tokenWeight > 1000 && qToken.length > 3 && pToken.startsWith(qToken)) {
+         bestTokenScore = Math.max(bestTokenScore, 0.9);
+         continue;
+      }
+
+      // C. Fuzzy Match (Levenshtein)
+      // Only for non-stop words longer than 3 chars
+      if (tokenWeight > 100 && qToken.length > 3) {
+        const dist = levenshtein(qToken, pToken);
+        const threshold = qToken.length > 6 ? 2 : 1;
+        
+        if (dist <= threshold) {
+          // Score degrades with distance
+          const fuzzyScore = 1.0 - (dist * 0.2); 
+          bestTokenScore = Math.max(bestTokenScore, fuzzyScore);
+        }
+      }
+    }
+
+    if (bestTokenScore > 0) {
+      totalScore += (bestTokenScore * tokenWeight);
+      if (bestTokenScore === 1.0) exactTokenMatches++;
+    }
+  });
+
+  // 3. Anchor Bias (First word matches)
   const anchorToken = queryTokens[0];
   const anchorSynonyms = medicalThesaurus[anchorToken] || [anchorToken];
-  const productStartsWithAnchor = anchorSynonyms.some(syn => productWords[0] === syn || productWords[0]?.startsWith(syn));
-  const productContainsAnchor = anchorSynonyms.some(syn => productWords.includes(syn));
-
-  if (productStartsWithAnchor) score += 5000; 
-  else if (productContainsAnchor) score += 1000; 
-  else {
-    if (queryTokens.length > 1) return -1;
+  // Check if product title starts with anchor or contains anchor near start
+  const anchorIndex = productTokens.findIndex(p => anchorSynonyms.includes(p));
+  if (anchorIndex === 0) {
+    totalScore += 2000;
+  } else if (anchorIndex > 0) {
+    totalScore += 1000;
   }
 
-  // Check for accessories mismatch
-  const accessoryKeywords = ['cabo', 'capa', 'suporte', 'p/', 'para'];
-  const isCaboSearch = anchorSynonyms.includes('cabo');
-  const isProductAccessory = productWords.some(w => accessoryKeywords.includes(w));
-  if (isProductAccessory && !isCaboSearch) score -= 4000;
+  // 4. Accessory Penalty
+  // If product is "Cabo para..." but query didn't ask for "Cabo"
+  const isCaboQuery = anchorSynonyms.includes('cabo') || anchorSynonyms.includes('suporte');
+  const productIsAccessory = productTokens.includes('cabo') || productTokens.includes('suporte');
+  if (productIsAccessory && !isCaboQuery) {
+    totalScore -= 3000;
+  }
 
-  queryTokens.forEach((token, qIdx) => {
-    const synonyms = medicalThesaurus[token] || [token];
-    let bestMatch = 0;
-    productWords.forEach((word) => {
-      if (synonyms.some(s => word === s)) {
-        bestMatch = 2000; 
-      } else {
-        const dist = levenshtein(token, word);
-        const threshold = token.length > 5 ? 2 : 1;
-        if (dist <= threshold) bestMatch = Math.max(bestMatch, 1000 - (dist * 200));
-      }
-    });
-    score += bestMatch;
-  });
-
-  return score;
+  return totalScore;
 };
 
 const App: React.FC = () => {
