@@ -241,20 +241,33 @@ const App: React.FC = () => {
       const extractedItems = await extractShoppingItems(queryInput);
       
       const results: BulkSearchResult[] = extractedItems.map((item, index) => {
+        // Logic to extract quantity from the end of the string
+        let searchName = item.name;
+        let finalQuantity = item.quantity;
+
+        // Regex: Matches anything followed by space and a number at the end of the string
+        // Ex: "Afastador Wolkman 3 Ganchos 2" -> Match group 1: "Afastador Wolkman 3 Ganchos", group 2: "2"
+        const qtyMatch = searchName.match(/^(.*?)\s+(\d+)$/);
+        
+        if (qtyMatch) {
+            searchName = qtyMatch[1].trim();
+            finalQuantity = parseInt(qtyMatch[2], 10);
+        }
+
         const matches = allProducts
-          .map(p => ({ ...p, matchScore: calculateMatchScore(p, item.name) }))
+          .map(p => ({ ...p, matchScore: calculateMatchScore(p, searchName) }))
           .filter(p => (p.matchScore || 0) > 0)
           .sort((a, b) => (b.matchScore || 0) - (a.matchScore || 0))
           .slice(0, 15);
 
         if (matches.length > 0) {
-          setQuotationState(prev => ({ ...prev, [index]: { [matches[0].id]: item.quantity } }));
+          setQuotationState(prev => ({ ...prev, [index]: { [matches[0].id]: finalQuantity } }));
         }
         return { 
-          term: item.name, 
+          term: searchName, // Use the cleaned name for display
           originalTerm: item.name, 
           products: matches, 
-          detectedQuantity: item.quantity 
+          detectedQuantity: finalQuantity // Use extracted quantity
         };
       });
 
