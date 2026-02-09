@@ -1,0 +1,5 @@
+{
+  "name": "SheetCommerce AI",
+  "description": "Uma plataforma de pesquisa inteligente de produtos alimentada pelo Google Sheets e Gemini AI.",
+  "requestFramePermissions": []
+}
