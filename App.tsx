@@ -307,6 +307,32 @@ const App: React.FC = () => {
     }));
   };
 
+  const handleRemoveItem = (indexToRemove: number) => {
+    // 1. Remove from bulkResults
+    setBulkResults(prev => prev.filter((_, idx) => idx !== indexToRemove));
+
+    // 2. Shift keys in quotationState
+    setQuotationState(prev => {
+        const newState: QuotationMap = {};
+        Object.keys(prev).forEach(key => {
+            const idx = parseInt(key);
+            if (idx < indexToRemove) {
+                newState[idx] = prev[idx];
+            } else if (idx > indexToRemove) {
+                newState[idx - 1] = prev[idx];
+            }
+            // idx === indexToRemove is implicitly dropped
+        });
+        return newState;
+    });
+
+    // 3. Shift expandedRows
+    setExpandedRows(prev => prev
+        .filter(idx => idx !== indexToRemove)
+        .map(idx => (idx > indexToRemove ? idx - 1 : idx))
+    );
+  };
+
   const filteredResults = useMemo(() => {
     if (selectedSupplierFilter === 'Todos os fornecedores') return bulkResults;
     return bulkResults.map(res => ({
@@ -463,7 +489,7 @@ const App: React.FC = () => {
                       <th className="py-4 px-4 text-right text-[10px] font-bold text-slate-500 uppercase tracking-wider">Valor Unit.</th>
                       <th className="py-4 px-4 text-right text-[10px] font-bold text-slate-500 uppercase tracking-wider">Valor Total</th>
                       <th className="py-4 px-4 text-center text-[10px] font-bold text-slate-500 uppercase tracking-wider w-24">Status</th>
-                      <th className="py-4 px-2 w-8 no-print"></th>
+                      <th className="py-4 px-2 w-20 text-center no-print">Ações</th>
                    </tr>
                  </thead>
                  <tbody className="divide-y divide-slate-100">
@@ -534,9 +560,18 @@ const App: React.FC = () => {
                                 </span>
                               )}
                             </td>
-                            <td className="py-4 px-2 no-print text-center">
+                            <td className="py-4 px-2 no-print text-center flex items-center justify-center gap-2">
+                               <button
+                                 onClick={(e) => { e.stopPropagation(); handleRemoveItem(idx); }}
+                                 className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors"
+                                 title="Remover Item"
+                               >
+                                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                               </button>
                                {hasMatches && (
-                                 <svg className={`w-4 h-4 text-slate-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                                 <div className={`p-1.5 transition-transform ${isExpanded ? 'rotate-180' : ''}`}>
+                                    <svg className="w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                                 </div>
                                )}
                             </td>
                          </tr>
