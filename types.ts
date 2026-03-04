@@ -1,5 +1,6 @@
 
 // Generic product type since columns are dynamic
+// Testing file system access
 export interface Product {
   [key: string]: string | number | Record<string, string> | null | undefined;
   id: string; // Generated ID

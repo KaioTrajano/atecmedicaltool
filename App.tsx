@@ -1,5 +1,6 @@
 
 import React, { useEffect, useState, useMemo, useRef } from 'react';
+import { Analytics } from "@vercel/analytics/react";
 import { MappedProduct, BulkSearchResult, QuotationMap } from './types';
 import { fetchAndParseProducts } from './services/csvService';
 import { extractShoppingItems, ExtractedItem } from './services/geminiService';
@@ -54,7 +55,13 @@ const CATEGORY_TERMS = new Set([
   'afastador', 'pinca', 'pinça', 'tesoura', 'porta', 'cabo', 'fio', 'lamina', 'lâmina', 
   'bisturi', 'agulha', 'clip', 'clipe', 'clips', 'broca', 'raspador', 'elevador', 'descolador', 
   'valva', 'especulo', 'espéculo', 'aspirador', 'canula', 'cânula', 'cesta', 'caixa', 
-  'cizalha', 'gancho', 'garra', 'dente', 'sonda', 'cateter', 'drill', 'perfurador'
+  'cizalha', 'gancho', 'garra', 'dente', 'sonda', 'cateter', 'drill', 'perfurador', 'abre', 'boca'
+]);
+
+const MODIFIER_TERMS = new Set([
+  'adulto', 'infantil', 'pediatrico', 'pediátrico', 'reto', 'reta', 'curvo', 'curva', 
+  'longo', 'longa', 'curto', 'curta', 'flexivel', 'flexível', 'rigido', 'rígido', 
+  'direito', 'esquerdo', 'direita', 'esquerda', 'maior', 'menor', 'médio', 'medio'
 ]);
 
 const normalizeText = (text: string): string => {
@@ -131,6 +138,8 @@ const calculateMatchScore = (product: MappedProduct, query: string): number => {
     
     if (STOP_WORDS.has(qToken)) {
       tokenWeight = 50; // Minimal weight for connectors/units
+    } else if (MODIFIER_TERMS.has(qToken)) {
+      tokenWeight = 500; // Modifiers
     } else if (CATEGORY_TERMS.has(qToken)) {
       tokenWeight = 2500; // Significant weight for Product Type (e.g., "Clips")
     } else if (!isNaN(Number(qToken))) {
@@ -256,11 +265,11 @@ const App: React.FC = () => {
 
         const matches = allProducts
           .map(p => ({ ...p, matchScore: calculateMatchScore(p, searchName) }))
-          .filter(p => (p.matchScore || 0) > 0)
+          .filter(p => (p.matchScore || 0) >= 2500)
           .sort((a, b) => (b.matchScore || 0) - (a.matchScore || 0))
-          .slice(0, 15);
+          .slice(0, 500);
 
-        if (matches.length > 0) {
+        if (matches.length > 0 && (matches[0].matchScore || 0) >= 3000) {
           setQuotationState(prev => ({ ...prev, [index]: { [matches[0].id]: finalQuantity } }));
         }
         return { 
@@ -279,7 +288,7 @@ const App: React.FC = () => {
       let notFound = 0;
 
       results.forEach(res => {
-        if (res.products.length === 0) {
+        if (res.products.length === 0 || (res.products[0].matchScore || 0) < 3000) {
           notFound++;
         } else {
           const p = res.products[0];
@@ -344,7 +353,12 @@ const App: React.FC = () => {
   const grandTotal = useMemo(() => {
     return filteredResults.reduce((total, result, idx) => {
         const selectedIds = Object.keys(quotationState[idx] || {});
-        const activeId = selectedIds[0] || (result.products.length > 0 ? result.products[0].id : null);
+        const selectedId = selectedIds[0];
+        
+        const activeId = (selectedId && result.products.some(p => p.id === selectedId)) 
+            ? selectedId 
+            : (result.products.length > 0 && (result.products[0].matchScore || 0) >= 3000 ? result.products[0].id : null);
+
         const p = activeId ? result.products.find(prod => prod.id === activeId) : null;
         const qty = activeId ? (quotationState[idx]?.[activeId] || result.detectedQuantity) : result.detectedQuantity;
         return total + ((p?.price || 0) * qty);
@@ -355,7 +369,12 @@ const App: React.FC = () => {
     const headers = ['Item Solicitado', 'Código', 'Produto Encontrado', 'Fornecedor', 'Quantidade', 'Preço Unitário', 'Preço Total', 'Status'];
     const rows = filteredResults.map((result, idx) => {
          const selectedIds = Object.keys(quotationState[idx] || {});
-         const activeId = selectedIds[0] || (result.products.length > 0 ? result.products[0].id : null);
+         const selectedId = selectedIds[0];
+         
+         const activeId = (selectedId && result.products.some(p => p.id === selectedId)) 
+            ? selectedId 
+            : (result.products.length > 0 && (result.products[0].matchScore || 0) >= 3000 ? result.products[0].id : null);
+
          const p = activeId ? result.products.find(prod => prod.id === activeId) : null;
          const qty = activeId ? (quotationState[idx]?.[activeId] || result.detectedQuantity) : result.detectedQuantity;
          
@@ -412,7 +431,7 @@ const App: React.FC = () => {
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 no-print">
           <h2 className="text-base font-bold text-[#1E5FCD] flex items-center gap-2 mb-4">
              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-             Cole a lista de produtos
+             Cole a lista de produto
           </h2>
           <textarea
              className="w-full h-48 p-4 border border-slate-200 rounded-lg text-sm font-mono focus:ring-2 focus:ring-[#1E5FCD] focus:border-[#1E5FCD] outline-none resize-none placeholder-slate-400 transition-all bg-slate-50 focus:bg-white"
@@ -495,8 +514,12 @@ const App: React.FC = () => {
                  <tbody className="divide-y divide-slate-100">
                    {filteredResults.map((result, idx) => {
                      const selectedIds = Object.keys(quotationState[idx] || {});
-                     // Default to first match if no selection, but check if any match exists
-                     const activeId = selectedIds[0] || (result.products.length > 0 ? result.products[0].id : null);
+                     const selectedId = selectedIds[0];
+                     
+                     const activeId = (selectedId && result.products.some(p => p.id === selectedId)) 
+                        ? selectedId 
+                        : (result.products.length > 0 && (result.products[0].matchScore || 0) >= 3000 ? result.products[0].id : null);
+
                      const p = activeId ? result.products.find(prod => prod.id === activeId) : null;
                      const qty = activeId ? (quotationState[idx]?.[activeId] || result.detectedQuantity) : result.detectedQuantity;
                      
@@ -550,7 +573,7 @@ const App: React.FC = () => {
                                <p className="text-[11px] text-slate-900 font-bold whitespace-nowrap">{p ? currencyFormatter.format((p.price || 0) * qty) : '-'}</p>
                             </td>
                             <td className="py-4 px-4 text-center">
-                              {hasMatches ? (
+                              {p ? (
                                 <span className={`inline-block px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider ${isExact ? 'bg-green-100 text-green-700' : 'bg-[#FFF8E1] text-[#B7791F]'}`}>
                                   {isExact ? 'Exato' : 'Similar'}
                                 </span>
@@ -628,6 +651,7 @@ const App: React.FC = () => {
            </button>
         </div>
       )}
+      <Analytics />
     </div>
   );
 };

@@ -14,7 +14,7 @@ const ProductTable: React.FC<ProductTableProps> = ({ products, termIndex, select
   const currencyFormatter = (val: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val);
 
   return (
-    <div className="overflow-x-auto">
+    <div className="overflow-x-auto max-h-96 overflow-y-auto">
       <table className="min-w-full divide-y divide-slate-100">
         <thead className="bg-slate-50">
           <tr>
