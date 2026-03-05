@@ -6,6 +6,9 @@ import { fetchAndParseProducts } from './services/csvService';
 import { extractShoppingItems, ExtractedItem } from './services/geminiService';
 import ProductTable from './components/ProductTable';
 
+
+
+
 // Expanded Thesaurus for better synonym matching
 const medicalThesaurus: Record<string, string[]> = {
   'afastador': ['afastador', 'afast', 'retractor', 'afast.'],
