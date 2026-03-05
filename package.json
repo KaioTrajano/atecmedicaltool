@@ -21,3 +21,5 @@
     "vite": "^6.2.0"
   }
 }
+
+"@vercel/analytics": "^1.6.1"
